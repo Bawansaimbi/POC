@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+.venv/
+venv/
+
+tmp/
+backend/tmp/
+
+sample_images/*.jpg
+sample_images/*.jpeg
+sample_images/*.png
+
