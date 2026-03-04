@@ -40,10 +40,7 @@ function badgeClass(result) {
 }
 
 function renderResults(data) {
-  const overall = data.overall_pass ? "ok" : "bad";
-  overallEl.innerHTML = `<span class="${badgeClass(overall)}">${
-    data.overall_pass ? "PASS" : "FAIL"
-  }</span><span>job_id: <code>${data.job_id}</code></span>`;
+  overallEl.innerHTML = "";
 
   checksEl.innerHTML = "";
   for (const c of data.checks || []) {
@@ -205,13 +202,11 @@ fileInput.addEventListener("change", () => {
   if (!currentFile) {
     originalImg.removeAttribute("src");
     processBtn.disabled = true;
-    manualCropBtn.disabled = true;
     setStatus("");
     return;
   }
 
   processBtn.disabled = false;
-  manualCropBtn.disabled = true;
 
   const url = URL.createObjectURL(currentFile);
   originalImg.src = url;
@@ -226,7 +221,6 @@ processBtn.addEventListener("click", async () => {
 
   setStatus("Uploading and processing...");
   processBtn.disabled = true;
-  manualCropBtn.disabled = true;
   setDownload(null);
 
   try {
@@ -240,8 +234,20 @@ processBtn.addEventListener("click", async () => {
     }
 
     const data = await res.json();
-    currentJobId = data.job_id;
     renderResults(data);
+
+    // Only allow cropping/downloading if all compliance checks pass (errors only).
+    if (!data.overall_pass) {
+      currentJobId = null;
+      cropRect = null;
+      croppedImg.removeAttribute("src");
+      setDownload(null);
+      manualCropBtn.disabled = true;
+      setStatus("Compliance failed. Please review the checks below.");
+      return;
+    }
+
+    currentJobId = data.job_id;
 
     // Visualize the automatic 600x600 crop on the original image
     if (data.crop_box) {

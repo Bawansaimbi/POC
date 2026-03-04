@@ -7,7 +7,13 @@ from app.config import get_settings
 from app.image_processing.compliance import run_compliance_checks
 from app.image_processing.cropping import detect_largest_face
 from app.image_processing.pipeline import process_upload_bytes
-from app.image_processing.utils import clamp_box_to_image, encode_image, load_pil_image, safe_crop
+from app.image_processing.utils import (
+    LowResolutionError,
+    clamp_box_to_image,
+    encode_image,
+    load_pil_image,
+    safe_crop,
+)
 from app.models import ManualCropRequest, ProcessResponse
 from app.storage import TempStorage
 
@@ -46,6 +52,8 @@ async def process_photo(
         original, cropped, cropped_bytes, crop_box, checks, warnings, overall_pass = (
             process_upload_bytes(data, settings)
         )
+    except LowResolutionError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Failed to process image: {e}") from e
 

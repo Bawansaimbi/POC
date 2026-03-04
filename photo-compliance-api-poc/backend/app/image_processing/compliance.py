@@ -1,14 +1,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import dist
 
 import cv2
+import mediapipe as mp
 import numpy as np
 from PIL import Image
 
 from app.config import Settings
 from app.image_processing.cropping import FaceDetection
 from app.models import CheckResult
+
+
+mp_face_mesh = mp.solutions.face_mesh
+_FACE_MESH = mp_face_mesh.FaceMesh(
+    static_image_mode=True,
+    refine_landmarks=True,
+    max_num_faces=1,
+    min_detection_confidence=0.5,
+)
 
 
 @dataclass(frozen=True)
@@ -25,6 +36,18 @@ def check_resolution(img_w: int, img_h: int, settings: Settings, *, name: str = 
         value={"width": img_w, "height": img_h},
         expected={"min_width": settings.min_width, "min_height": settings.min_height},
         message=None if passed else "Image resolution is below the minimum requirement.",
+        level="error" if not passed else "info",
+    )
+
+
+def check_face_present(face: FaceDetection | None, *, name: str = "human_face_present") -> CheckResult:
+    passed = face is not None
+    return CheckResult(
+        name=name,
+        passed=passed,
+        value={"detected": bool(face)},
+        expected={"detected": True},
+        message=None if passed else "No human face detected in the cropped image.",
         level="error" if not passed else "info",
     )
 
@@ -56,6 +79,61 @@ def check_blur(pil_img: Image.Image, settings: Settings, *, name: str = "blur") 
         expected={"min_laplacian_var": settings.blur_laplacian_var_threshold},
         message=None if passed else "Image appears blurry (low edge detail).",
         level="warning" if not passed else "info",
+    )
+
+
+def _eye_aspect_ratio(landmarks: list[mp_face_mesh.FaceMesh], idxs: list[int]) -> float:
+    p = [landmarks[i] for i in idxs]
+    # Standard EAR: (||p2-p6|| + ||p3-p5||) / (2 * ||p1-p4||)
+    num = dist((p[1].x, p[1].y), (p[5].x, p[5].y)) + dist(
+        (p[2].x, p[2].y), (p[4].x, p[4].y)
+    )
+    den = 2.0 * dist((p[0].x, p[0].y), (p[3].x, p[3].y))
+    if den <= 0:
+        return 0.0
+    return num / den
+
+
+def check_eyes_open(
+    pil_img: Image.Image,
+    face: FaceDetection | None,  # unused but kept for API symmetry
+    *,
+    name: str = "eyes_open",
+) -> CheckResult:
+    rgb = np.array(pil_img.convert("RGB"), dtype=np.uint8)
+    results = _FACE_MESH.process(rgb)
+
+    if not results.multi_face_landmarks:
+        return CheckResult(
+            name=name,
+            passed=False,
+            value={"ear_left": 0.0, "ear_right": 0.0},
+            expected={"ear_threshold": 0.21},
+            message="No face landmarks detected to evaluate eyes.",
+            level="error",
+        )
+
+    face_landmarks = results.multi_face_landmarks[0].landmark
+
+    # Indices for left/right eyes from MediaPipe FaceMesh topology.
+    left_idxs = [33, 160, 158, 133, 153, 144]
+    right_idxs = [362, 385, 387, 263, 373, 380]
+
+    ear_left = _eye_aspect_ratio(face_landmarks, left_idxs)
+    ear_right = _eye_aspect_ratio(face_landmarks, right_idxs)
+    ear_threshold = 0.21
+
+    passed = ear_left >= ear_threshold and ear_right >= ear_threshold
+
+    return CheckResult(
+        name=name,
+        passed=passed,
+        value={"ear_left": ear_left, "ear_right": ear_right},
+        expected={"ear_threshold": ear_threshold},
+        message=None
+        if passed
+        else "Eyes appear to be closed or heavily occluded.",
+        level="error" if not passed else "info",
     )
 
 
@@ -141,6 +219,7 @@ def check_background(
     #     level="warning" if not texture_pass else "info",
     # )
 
+
     return [white_check]
 
 
@@ -159,6 +238,8 @@ def run_compliance_checks(
     checks.append(check_resolution(w, h, settings))
     checks.append(check_aspect_ratio(w, h, settings))
     checks.append(check_blur(cropped_pil, settings))
+    checks.append(check_face_present(face_in_cropped))
+    checks.append(check_eyes_open(cropped_pil, face_in_cropped))
 
     bg_checks = check_background(cropped_pil, face_in_cropped, settings)
     checks.extend(bg_checks)
@@ -168,4 +249,5 @@ def run_compliance_checks(
             warnings.append(c.message)
 
     return checks, warnings
+
 

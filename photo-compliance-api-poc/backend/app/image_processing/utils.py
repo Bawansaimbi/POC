@@ -11,6 +11,10 @@ class ImageDecodeError(ValueError):
     pass
 
 
+class LowResolutionError(ValueError):
+    pass
+
+
 def load_pil_image(image_bytes: bytes) -> Image.Image:
     try:
         with Image.open(BytesIO(image_bytes)) as im:

@@ -5,7 +5,7 @@ from PIL import Image
 from app.config import Settings
 from app.image_processing.compliance import run_compliance_checks
 from app.image_processing.cropping import FaceDetection, crop_face_centered
-from app.image_processing.utils import encode_image, load_pil_image
+from app.image_processing.utils import LowResolutionError, encode_image, load_pil_image
 
 def _face_to_crop_coords(
     face: FaceDetection | None, crop_box: tuple[int, int, int, int]
@@ -18,6 +18,9 @@ def _face_to_crop_coords(
 
 def process_upload_bytes(image_bytes: bytes, settings: Settings) -> tuple[Image.Image, Image.Image, bytes, tuple[int, int, int, int], list, list[str], bool]:
     original = load_pil_image(image_bytes)
+    img_w, img_h = original.size
+    if img_w < settings.min_width or img_h < settings.min_height:
+        raise LowResolutionError("Low resolution ( minimum 600x600 required)")
     cropped, crop_box, face_in_original = crop_face_centered(original, settings)
     face_in_cropped = _face_to_crop_coords(face_in_original, crop_box)
 
